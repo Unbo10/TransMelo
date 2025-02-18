@@ -1,5 +1,5 @@
 #* Python garbage
-__pycache__/
+**/__pycache__/
 
 #* Virtual environmets
 .venv/
