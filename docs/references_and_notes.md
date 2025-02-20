@@ -30,3 +30,6 @@ Since every row is separated by a single breakline (`\n`, can be checked printin
 > The first line will always be 89 characters long.
 
 > EOF means End Of File. When accessing a CSV file using Python, it sets the EOF to be an empty string (`""`)
+
+# Algorithm
+- Description: Reinforcement learning algorithm using max and min functions
