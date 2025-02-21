@@ -110,6 +110,13 @@ class ObjArr:
             repr += f"{self.__arr[self.__size - 1]}"
         repr += "]"
         return repr
+    
+
+    def __iter__(self) -> any:
+        for i in range(self.__size):
+            if self.__arr[i] is not None:
+                yield self[i]
+
 
     def __len__(self) -> int:
         """Returns the size of the array"""

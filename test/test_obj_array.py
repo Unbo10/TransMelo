@@ -1,4 +1,5 @@
 import unittest
+
 from src.utilities.data_structures import ObjArr, IntArr
 
 class TestObjArr(unittest.TestCase):
@@ -42,6 +43,23 @@ class TestObjArr(unittest.TestCase):
         # Check the string representation of ObjArr after assignment
         expected_repr = "[[0, 1, 2], [1, 2, 3], [2, 3, 4]]"
         self.assertEqual(arr_of_arrs.__repr__(), expected_repr)
+
+    def test_obj_arr_iteration(self):
+        # Test the iteration over ObjArr
+        arr_of_arrs = ObjArr(3)
+        for i in range(3):
+            temp = IntArr(3)
+            for j in range(3):
+                temp[j] = j + i
+            arr_of_arrs[i] = temp
+        
+        # Collect elements using iteration
+        collected_elements = [elem for elem in arr_of_arrs]
+        
+        # Check that the elements were iterated correctly
+        self.assertEqual(collected_elements[0].__repr__(), "[0, 1, 2]")
+        self.assertEqual(collected_elements[1].__repr__(), "[1, 2, 3]")
+        self.assertEqual(collected_elements[2].__repr__(), "[2, 3, 4]")
 
 if __name__ == '__main__':
     unittest.main()

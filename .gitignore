@@ -3,3 +3,6 @@
 
 #* Virtual environmets
 .venv/
+
+#* Visual Studio files
+.vscode/

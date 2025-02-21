@@ -1,6 +1,6 @@
 import ctypes
 
-from .bool_array import BoolArr
+from .boolArr import BoolArr
 
 class IntArr:
     def __init__(self, capacity: int = 0):

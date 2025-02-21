@@ -1,4 +1,5 @@
 import unittest
+
 from src.utilities.data_structures import IntArr
 
 class TestIntArr(unittest.TestCase):
