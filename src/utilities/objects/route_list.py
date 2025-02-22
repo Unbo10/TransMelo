@@ -35,9 +35,9 @@ def k16() -> Route:
     station_codes[12] = "02502" #! No info about Calle 187
     station_names[12] = "Terminal"
 
-    zones[0] = "33" #* B zone
-    zones[1] = "38" #* E zone central NQS 
-    zones[2] = "11" #* K zone
+    zones[0] = "(33)Zona B AutoNorte" #* B zone
+    zones[1] = "(38)Zona E NQS Central" #* E zone central NQS 
+    zones[2] = "(11)Zona K Calle 26" #* K zone
 
     k_16: Route = Route("K16", station_codes, station_names, zones)
     

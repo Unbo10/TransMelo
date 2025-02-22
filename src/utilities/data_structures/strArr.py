@@ -95,10 +95,34 @@ class StrArr:
             raise MemoryError("Not enough space in the array")
 
 
+    def __len__(self) -> int:
+        return self.__size
+
+
     def __iter__(self):
         for i in range(self.__size):
             if self.__arr[i] != "" and self.__arr[i] is not None:
                 yield self[i]
+
+
+    def __contains__(self, value: str) -> bool:
+        """
+        Checks if the array contains the specified value.
+
+        Parameters
+        ----------
+        value : str
+            The value to check for in the array.
+
+        Returns
+        -------
+        bool
+            True if the value is found in the array, False otherwise.
+        """
+        for i in range(self.__size):
+            if self.__arr[i] and ctypes.cast(self.__arr[i], ctypes.c_char_p).value.decode("utf-8") == value:
+                return True
+        return False
 
 
     def __repr__(self) -> str:
@@ -133,11 +157,3 @@ class StrArr:
                     self.free(self.__arr[i])  #*Free each string
             self.free(self.__arr)  #*Free the array itself
         self.__arr = None
-
-
-if __name__ == "__main__":
-    arr: StrArr = StrArr(3)
-    arr[0] = "Hello"
-    arr[1] = "world"
-    arr[2] = "!"
-    print(arr)

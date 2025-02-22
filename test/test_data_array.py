@@ -20,7 +20,7 @@ class TestFileHandling(unittest.TestCase):
 
         # Call the function with the absolute path
         route = k16()
-        create_data_array(file_name=absolute_route, route=route)
+        create_data_array(file_name=absolute_route, route=route, start_time=1, end_time=2, filter_entrances=True)
 
         # Verify that create_data_array was called with the correct absolute file path
         mock_create_data_array.assert_called_once_with(file_name=absolute_route, route=route)

@@ -103,6 +103,40 @@ class IntArr:
         return repr
 
 
+    def __iter__(self):
+        """
+        Returns an iterator for the array.
+
+        Yields
+        ------
+        int
+            The next value in the array.
+        """
+        for i in range(self.__capacity):
+            if self.__assigned[i]:
+                yield self.__arr[i]
+
+
+    def __contains__(self, value: int) -> bool:
+        """
+        Checks if the array contains the specified value.
+
+        Parameters
+        ----------
+        value : int
+            The value to check for in the array.
+
+        Returns
+        -------
+        bool
+            True if the value is found in the array, False otherwise.
+        """
+        for i in range(self.__capacity):
+            if self.__assigned[i] and self.__arr[i] == value:
+                return True
+        return False
+
+
     def __len__(self) -> int:
         """Returns the size of the array"""
         return self.__size

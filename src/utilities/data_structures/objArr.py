@@ -45,7 +45,7 @@ class ObjArr:
             self.__arr[i] = None 
 
 
-    def __setitem__(self, index: int, value) -> None:
+    def __setitem__(self, index: int, value: any) -> None:
         """
         Sets the value at the specified index in the array.
 
@@ -62,16 +62,12 @@ class ObjArr:
             If the index is out of range.
         """
         if 0 <= index < self.__capacity:
-            #*Increase reference count for the new object
-            ctypes.pythonapi.Py_IncRef(ctypes.py_object(value))
-            
-            #*Decrease reference count for the old object before replacing
+            #*Decrease reference count for the old object before replacing (not managed by Python's garbage collector)
             if self.__arr[index] is not None:
                 ctypes.pythonapi.Py_DecRef(ctypes.py_object(self.__arr[index]))
             else:
                 self.__size += 1
-
-            self.__arr[index] = value #!Make sure this is legal (arguably it is, since it's just an operator and how Python manages pointer dereferencing and arithmetic)
+            self.__arr[index] = ctypes.py_object(value) #!Make sure this is legal (arguably it is, since it's just an operator and how Python manages pointer dereferencing and arithmetic)
         else:
             raise IndexError("Index out of range")
 
@@ -132,9 +128,5 @@ class ObjArr:
         for i in range(self.__capacity):
             if self.__arr[i] is not None:
                 ctypes.pythonapi.Py_DecRef(ctypes.py_object(self.__arr[i]))
-
-        #* Free (pointer's) allocated memory
-        pass
-        #ctypes.CDLL(None).free(self.__arr)
     
     

@@ -84,7 +84,16 @@ class TestStrArr(unittest.TestCase):
             next(iterator)
 
 
+    def test_contains(self):
+        """Test the __contains__ method"""
+        self.str_arr[0] = "alpha"
+        self.str_arr[1] = "beta"
+        self.str_arr[2] = "gamma"
 
+        self.assertIn("alpha", self.str_arr)
+        self.assertIn("beta", self.str_arr)
+        self.assertIn("gamma", self.str_arr)
+        self.assertNotIn("delta", self.str_arr)
     
 
 if __name__ == '__main__':
