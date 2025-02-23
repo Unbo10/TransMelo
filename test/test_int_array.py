@@ -1,4 +1,5 @@
 import unittest
+
 from src.utilities.data_structures import IntArr
 
 class TestIntArr(unittest.TestCase):
@@ -36,6 +37,15 @@ class TestIntArr(unittest.TestCase):
         # Test the size of the array
         arr = IntArr(3)
         self.assertEqual(len(arr), 3)  # Assert the size is 3
+
+    def test_contains(self):
+        # Test the __contains__ method
+        arr = IntArr(5)
+        arr[1] = 15
+        arr[3] = 30
+        self.assertIn(15, arr)  # Assert 15 is in the array
+        self.assertIn(30, arr)  # Assert 30 is in the array
+        self.assertNotIn(25, arr)  # Assert 25 is not in the array
 
 if __name__ == '__main__':
     unittest.main()

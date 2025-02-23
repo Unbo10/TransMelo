@@ -1,4 +1,5 @@
 import sys, os, unittest
+
 from src.utilities.data_structures import BoolArr
 
 
