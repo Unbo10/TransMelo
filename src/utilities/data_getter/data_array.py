@@ -24,6 +24,7 @@ def get_zone_name(zone_code: str, route: Route) -> str:
 def create_data_array(file_name: str, route: Route, start_time: int, end_time: int, filter_stations: bool = True, filter_entrances: bool = True) -> ObjArr:
     """
     Creates an ObjArr containing data parsed from a file, filtered by a given route and time range.
+    
     Parameters
     ----------
     file_name : str
@@ -59,6 +60,7 @@ def create_data_array(file_name: str, route: Route, start_time: int, end_time: i
     line_indices_list: LList = LList()
     current_time: int = 0
     while not EOF_reached:
+        #! Take start_time into account
         current_time: int = int(content[row_start + 11: row_start + 13]) #*24-hour format
         current_zone: str = int(content[row_start + 21 : row_start + 23]) #*Two-digit format
         try:
@@ -70,22 +72,28 @@ def create_data_array(file_name: str, route: Route, start_time: int, end_time: i
                 row_end += 1
         except IndexError:
             EOF_reached = True
-        if current_zone in route.zone_codes:
-            if filter_stations == True:
-                zone_name_length: int = len(route.zone_names[get_zone_name(current_zone, route)])
-                print(content[row_start: row_end], zone_name_length)
-                station_code: int = content[row_start + 19 + zone_name_length + 3: row_start + 19 + zone_name_length + 8] #* 19 is the distance from the first position of a row to the second comma, and three is to account for the comma and the parenthesis that follow each zone name
-                if station_code in route.station_codes:
+        if start_time <= current_time < end_time:
+            if current_zone in route.zone_codes:
+                if filter_stations == True:
+                    zone_name_length: int = len(route.zone_names[get_zone_name(current_zone, route)])
+                    #*19 is the distance from the first position of a row to the second comma,
+                    #*and three is to account for the comma and the parenthesis that follow
+                    #*each zone name
+                    station_code: int = content[row_start + 19 + zone_name_length + 3: row_start + 19 + zone_name_length + 8]
+                    if station_code in route.station_codes:
+                        line_indices_list.add(row_start)
+                        line_indices_list.add(row_end)
+                        # print(content[row_start: row_end])
+                    else:
+                        pass
+                else:
                     line_indices_list.add(row_start)
                     line_indices_list.add(row_end)
-                    print(content[row_start: row_end])
-                else:
-                    pass
-            else:
-                line_indices_list.add(row_start)
-                line_indices_list.add(row_end)
+        else:
+            pass
         row_start = row_end + 1
-        row_end += 50 #*We can safely say each row will have more than 50 chrs
+        #*We can safely say each row will have more than 50 chrs
+        row_end += 50
 
     data: ObjArr = ObjArr(len(line_indices_list)//2) #*Since there are an even number of end and start indices
     #*It will look like this: [date, time, zone, station, station access, device, entrances, exits]
@@ -95,7 +103,7 @@ def create_data_array(file_name: str, route: Route, start_time: int, end_time: i
     col_start: int = 0
     col_end: int = 0
     row_data: StrArr = StrArr(8)
-    print(line_indices_list)
+    # print(line_indices_list)
 
     while i + 1 <  len(line_indices_list):
         while (content[line_indices_list[i] + col_end] != "," and content[line_indices_list[i] + col_end] != "\n"):
@@ -119,5 +127,6 @@ def create_data_array(file_name: str, route: Route, start_time: int, end_time: i
         else:
             col_end += 1 #* Go one position past the comma
             col_start = col_end
+
 
     return data
