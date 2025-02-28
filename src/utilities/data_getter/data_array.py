@@ -81,14 +81,14 @@ def create_data_array(file_name: str, route: Route, start_time: int, end_time: i
                     #*each zone name
                     station_code: int = content[row_start + 19 + zone_name_length + 3: row_start + 19 + zone_name_length + 8]
                     if station_code in route.station_codes:
-                        line_indices_list.add(row_start)
-                        line_indices_list.add(row_end)
+                        line_indices_list.append(row_start)
+                        line_indices_list.append(row_end)
                         # print(content[row_start: row_end])
                     else:
                         pass
                 else:
-                    line_indices_list.add(row_start)
-                    line_indices_list.add(row_end)
+                    line_indices_list.append(row_start)
+                    line_indices_list.append(row_end)
         else:
             pass
         row_start = row_end + 1

@@ -13,8 +13,8 @@ class TestObjArr(unittest.TestCase):
     def test_obj_arr_with_capacity(self):
         # Test creating an ObjArr with a specific size
         arr_of_arrs = ObjArr(3)
-        self.assertEqual(len(arr_of_arrs), 3)  # Assert the size of ObjArr is 3
-        self.assertEqual(arr_of_arrs.__repr__(), "[None, None, None]")  # Assert the initial state (None)
+        self.assertEqual(len(arr_of_arrs), 0)  # Assert the size of ObjArr is 0
+        self.assertEqual(arr_of_arrs.__repr__(), "[]")  # Assert the initial state (None)
 
     def test_nested_array_assignment(self):
         # Test assigning IntArr objects to ObjArr

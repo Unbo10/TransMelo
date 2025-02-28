@@ -8,7 +8,7 @@ from src.utilities.data_structures.strArr import StrArr
 from src.utilities.data_structures.objArr import ObjArr
 from src.utilities.objects.route_list import k16
 
-class TestFileHandling(unittest.TestCase):
+class TestDataArray(unittest.TestCase):
     @patch('src.utilities.data_getter.data_array.create_data_array')
     def test_create_data_array_with_correct_file_path(self, mock):
         # Get the absolute path of the current directory (where test.py is located)

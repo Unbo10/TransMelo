@@ -41,7 +41,7 @@ class ObjArr:
         #*not being handled by ctypes by default, and for the reference
         #*handling implementation)
         for i in range(capacity):
-            #* To check if there's a 
+            #* To check if there's a free space
             self.__arr[i] = None 
 
 
@@ -63,11 +63,9 @@ class ObjArr:
         """
         if 0 <= index < self.__capacity:
             #*Decrease reference count for the old object before replacing (not managed by Python's garbage collector)
-            if self.__arr[index] is not None:
-                ctypes.pythonapi.Py_DecRef(ctypes.py_object(self.__arr[index]))
-            else:
+            if self.__arr[index] is None:
                 self.__size += 1
-            self.__arr[index] = ctypes.py_object(value) #!Make sure this is legal (arguably it is, since it's just an operator and how Python manages pointer dereferencing and arithmetic)
+            self.__arr[index] = value #!Make sure this is legal (arguably it is, since it's just an operator and how Python manages pointer dereferencing and arithmetic)
         else:
             raise IndexError("Index out of range")
 
@@ -101,8 +99,9 @@ class ObjArr:
         """
         repr: str = "["
         for i in range(self.__size - 1):
-            repr += f"{self.__arr[i]}, "
-        if self.__size > 0:
+            if self.__arr[i] is not None:
+                repr += f"{self.__arr[i]}, "
+        if self.__size > 0 and self.__arr[self.__size - 1] is not None:
             repr += f"{self.__arr[self.__size - 1]}"
         repr += "]"
         return repr
@@ -145,12 +144,10 @@ class ObjArr:
 
     def __del__(self) -> None:
         """
-        Frees the memory of the head pointer (since it's a C type) and
-        decreases the reference count of all the elements in the array to let
-        the garbage collector free their memory.
+        Frees the memory of the head pointer
         """
-        for i in range(self.__capacity):
-            if self.__arr[i] is not None:
-                ctypes.pythonapi.Py_DecRef(ctypes.py_object(self.__arr[i]))
+        #*No need to use ctype since Python objects are being stored in the
+        #*array
+        del self.__arr
     
     
