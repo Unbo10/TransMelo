@@ -31,7 +31,7 @@ class ObjArr:
         self.__arr = ctypes.cast(
             (ctypes.py_object * capacity)(),
             ctypes.POINTER(ctypes.py_object)
-        ) #* Allocate memory using malloc to avoid using C's built-in arrays
+        )
         #? py_obj is about 7 times the capacity of a c_int
         #? stores any type of object, so it can be treated as a list
         if not self.__arr:
@@ -112,6 +112,30 @@ class ObjArr:
         for i in range(self.__size):
             if self.__arr[i] is not None:
                 yield self[i]
+
+
+    def __eq__(self, other: 'ObjArr') -> bool:
+        """
+        Checks if this array is equal to another array.
+
+        Parameters
+        -----------
+        other: ObjArr
+            The other array to compare with.
+
+        Returns
+        --------
+        bool
+            True if the arrays are equal, False otherwise.
+        """
+        if not isinstance(other, ObjArr):
+            return False
+        if self.__size != other.__size:
+            return False
+        for i in range(self.__size):
+            if self.__arr[i] != other.__arr[i]:
+                return False
+        return True
 
 
     def __len__(self) -> int:

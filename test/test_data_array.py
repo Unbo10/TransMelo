@@ -4,11 +4,13 @@ import unittest
 from unittest.mock import patch
 
 from src.utilities.data_getter.data_array import create_data_array
+from src.utilities.data_structures.strArr import StrArr
+from src.utilities.data_structures.objArr import ObjArr
 from src.utilities.objects.route_list import k16
 
 class TestFileHandling(unittest.TestCase):
     @patch('src.utilities.data_getter.data_array.create_data_array')
-    def test_create_data_array_with_correct_file_path(self, mock_create_data_array):
+    def test_create_data_array_with_correct_file_path(self, mock):
         # Get the absolute path of the current directory (where test.py is located)
         test_directory = os.path.dirname(os.path.abspath(__file__))
 
@@ -20,13 +22,16 @@ class TestFileHandling(unittest.TestCase):
 
         # Call the function with the absolute path
         route = k16()
-        create_data_array(file_name=absolute_route, route=route, start_time=1, end_time=2, filter_entrances=True)
+        arr = create_data_array(file_name=absolute_route, route=route, start_time=1, end_time=2, filter_entrances=True)
 
-        # Verify that create_data_array was called with the correct absolute file path
-        mock_create_data_array.assert_called_once_with(file_name=absolute_route, route=route)
+        print("Data array:", arr)
+
+        #*Verify that array is empty, since between 1 and 2, nobody entered the
+        #*stations of the K16 route
+        self.assertEqual(ObjArr(0), arr)
 
     @patch('src.utilities.data_getter.data_array.create_data_array')
-    def test_file_path_construction(self, mock_create_data_array):
+    def test_file_path_construction(self, mock):
         # Test the correct construction of the file path
         test_directory = os.path.dirname(os.path.abspath(__file__))
         relative_path = os.path.join(test_directory, "..", "data", "20250211.csv")
