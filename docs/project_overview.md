@@ -5,7 +5,7 @@ The idea is to create a reinforcement learning (RL) alrogithm that optimizes the
 
 ## Routes
 
-The routes will have a slight twicht, namely, that the K16 route can start from Portal Norte or from Alcalá. This is to force the agent to take a decision on making a U-turn after Alcalá (to deploy a K23 route) or to continue to Portal Norte (to deploy a K16 route). Therefore, the routes will be as follows:
+The routes will have a slight twicht, namely, that the K16 route can start from Portal Norte or from Alcalá. This is to force the agent to take a decision on makingv a U-turn after Alcalá (to deploy a K23 route) or to continue to Portal Norte (to deploy a K16 route). Therefore, the routes will be as follows:
 
 - K16: Portal El Dorado (starting from Portal Norte or from Alcalá)
 - K23: Portal El Dorado (starting from Portal Norte or from Alcalá)
@@ -76,10 +76,28 @@ It will start with a given policy or reward function (to be defined), the initia
 After the first episode (simulation), it will know the output of the policy and adjusts the weights of the neural network according to a loss function and its gradient descent. Once adjusted, the neural network will suggest new policy, and the process will be repeated until the agent finds the best policy to maximize the reward function.
 
 
+### Neural networks
+
+A combination of an actor-based and a critic-based was deemed to be the best approach.
+
+
+#### Actor-based
+
+An actor makes decision on the environment given a current state, trying to optimize this actions (via optimizing the policy). The actor will be a neural network that will output the probability of deploying a bus in one of the three starting points and the probability of making a U-turn or not. The output will be a vector of two probabilities, one for each action.
+
+
+#### Critic-based
+
+A critic evaluates the actions of the actor, giving a value to the state-action pair. This neural network will output the value of the state-action pair, meaning the cumulative reward that the agent will get if it takes that action in that state. The output will be a scalar.
+
+In essence, the actor focuses on selecting the best actions for the current state (*what to do* - policy optimization), while the critic evaluates how good those actions will be in terms of future rewards (*how good is the current state* - value function).
+
+
 ### To-do
 
 - [ ] Model the transitway as a graph (this includes gathering info about passangers at each station, and time and distance between stations).
 - [ ] Define the environment and agent using (Gym).
 - [ ] Build the PPO agent (using PyTorch or TensorFlow).
+- [ ] Show data.
 - [ ] Run several episodes and adjust the hyperparameters (the given ones).
 - [ ] Compare the results with the current deployment of buses.

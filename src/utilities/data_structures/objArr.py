@@ -137,6 +137,19 @@ class ObjArr:
         return True
 
 
+    @property
+    def capacity(self) -> int:
+        """
+        Gets the current capacity of the array.
+        
+        Returns:
+        --------
+        int
+            The maximum number of elements the array can hold.
+        """
+        return self.__capacity
+
+
     def __len__(self) -> int:
         """Returns the size of the array"""
         return self.__size

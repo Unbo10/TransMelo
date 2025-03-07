@@ -6,7 +6,7 @@ from unittest.mock import patch
 from src.utilities.data_getter.data_array import create_data_array
 from src.utilities.data_structures.strArr import StrArr
 from src.utilities.data_structures.objArr import ObjArr
-from src.utilities.objects.route_list import k16
+from src.utilities.objects.route_list import r16, r23
 
 class TestDataArray(unittest.TestCase):
     @patch('src.utilities.data_getter.data_array.create_data_array')
@@ -21,7 +21,7 @@ class TestDataArray(unittest.TestCase):
         absolute_route = os.path.abspath(relative_path)
 
         # Call the function with the absolute path
-        route = k16()
+        route = r23()
         arr = create_data_array(file_name=absolute_route, route=route, start_time=1, end_time=2, filter_entrances=True)
 
         print("Data array:", arr)

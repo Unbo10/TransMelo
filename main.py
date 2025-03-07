@@ -1,5 +1,5 @@
 #from src.utilities.data_getter import create_data_array
-import gym
+import gymnasium as gym
 from optimization.ppo.trainer import train
 from config import Config
 import numpy as np

@@ -24,6 +24,7 @@ def get_zone_name(zone_code: str, route: Route) -> str:
 def create_data_array(file_name: str, route: Route, start_time: int, end_time: int, filter_stations: bool = True, filter_entrances: bool = True) -> ObjArr:
     """
     Creates an ObjArr containing data parsed from a file, filtered by a given route and time range.
+    The format is: `[date, time, zone, station, station access, device, entrances, exits]`
     
     Parameters
     ----------
@@ -61,6 +62,8 @@ def create_data_array(file_name: str, route: Route, start_time: int, end_time: i
     current_time: int = 0
     while not EOF_reached:
         #! Take start_time into account
+        if content[row_start + 11] == ",":
+            row_start += 1
         current_time: int = int(content[row_start + 11: row_start + 13]) #*24-hour format
         current_zone: str = int(content[row_start + 21 : row_start + 23]) #*Two-digit format
         try:

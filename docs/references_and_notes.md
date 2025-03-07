@@ -33,3 +33,23 @@ Since every row is separated by a single breakline (`\n`, can be checked printin
 
 # Algorithm
 - Description: Reinforcement learning algorithm using max and min functions
+
+
+### Neural networks
+
+A combination of an actor-based and a critic-based was deemed to be the best approach.
+
+
+#### Actor-based
+
+An actor makes decision on the environment given a current state, trying to optimize this actions (via optimizing the policy). The actor will be a neural network that will output the probability of deploying a bus in one of the three starting points and the probability of making a U-turn or not. The output will be a vector of two probabilities, one for each action.
+
+
+#### Critic-based
+
+A critic evaluates the actions of the actor, giving a value to the state-action pair. This neural network will output the value of the state-action pair, meaning the cumulative reward that the agent will get if it takes that action in that state. The output will be a scalar.
+
+In essence, the actor focuses on selecting the best actions for the current state (*what to do* - policy optimization), while the critic evaluates how good those actions will be in terms of future rewards (*how good is the current state* - value function).
+
+
+> Adam is short for Adaptive Moment Estimation, an optimizer that combines two other techniques to make learning and training as efficient as possible.
