@@ -83,6 +83,37 @@ class LList:
         self.__size -= 1
 
 
+    @property
+    def head(self) -> any:
+        """
+        Gets the value stored in the head node of the linked list.
+
+        Returns
+        -------
+        any
+            The value of the head node, or None if the list is empty.
+        """
+        if self.__head is not None:
+            return self.__head
+        return None
+
+    @head.setter
+    def head(self, value: any) -> None:
+        """
+        Sets the value of the head node in the linked list.
+        If the list is empty, creates a new node.
+
+        Parameters
+        ----------
+        value : any
+            The new value to store in the head node.
+        """
+        if self.__head is not None:
+            self.__head = value
+        else:
+            self.append(value)
+
+
     def __getitem__(self, index: int) -> any:
         """
         Retrieves the value at the specified index in the linked list.

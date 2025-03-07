@@ -1,28 +1,60 @@
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
+from stable_baselines3 import PPO
 
 from src.utilities.data_getter.clean_data_array import clean_data_arr
-from src.utilities.data_structures.objArr import ObjArr
+from src.utilities.data_structures.lList import LList
 from src.utilities.data_structures.dictionary import Dictionary
+from src.utilities.data_structures.objArr import ObjArr
 from src.utilities.data_structures.graph.system_graph import SystemGraph
 from src.utilities.objects.bus import Bus
 from src.utilities.objects.route import Route
-from src.utilities.objects.route_list import joint
+from src.utilities.objects.route_list import joint, r16, r23
 from src.utilities.objects.station import Station
 
 
 class TransMeloEnv(gym.Env):
-    def __init__(self, stations: ObjArr, initial_buses: ObjArr, passenger_flow: Dictionary, u_turn_stations: ObjArr):
+    def __init__(
+        self,
+        station_names=None,
+        station_list=None,
+        initial_buses=None,
+        passenger_flow=None,
+        u_turn_stations=None,
+        max_time=60
+        ):
         super(TransMeloEnv, self).__init__()
 
+        if station_names is None:
+            station_names = joint().station_names
+        if station_list is None:
+            stations = ObjArr(22)
+            joint_stations = joint()
+            for i in range(len(stations)):
+                stations[i] = Station(name=joint_stations.station_names[i])
+            station_list = stations
+        if initial_buses is None:
+            buses = ObjArr(10)
+            for i in range(len(buses)):
+                buses[i] = Bus(i)
+            initial_buses = buses
+        if passenger_flow is None:
+            passenger_flow = clean_data_arr()
+        if u_turn_stations is None:
+            u_turn = ObjArr(1)
+            u_turn[0] = "Alcalá – Colegio S. Tomás Dominicos"
+            u_turn_stations = u_turn
+
         self.graph: SystemGraph = SystemGraph()
-        self.station_names: ObjArr = stations
+        self.station_names: ObjArr = station_names
+        self.stations: ObjArr = station_list
         self.buses: ObjArr = initial_buses
-        self.passenger_flow: Dictionary = passenger_flow
+        self.passenger_flow: ObjArr = passenger_flow
+        self.passenger_flow_dict: Dictionary = Dictionary(35)
         self.u_turn_stations: ObjArr = u_turn_stations
-        self.route_decision = Dictionary()
-        self.deploy_decision = Dictionary()
+        self.route_decision = Dictionary(10)
+        self.deploy_decision = Dictionary(10)
 
         self.num_stations = len(self.station_names)
         self.num_buses = len(self.buses)
@@ -33,8 +65,33 @@ class TransMeloEnv(gym.Env):
 
         #* Observation space: Buses' locations, passenger flow, and availability
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.num_stations * 2 + self.num_buses,), dtype=np.float32)
+        self.process_passenger_data()
 
-    def reset(self):
+
+    def process_passenger_data(self):
+        """
+        Converts an ObjArr of linked lists into a dictionary mapping 
+        station names to lists of (entries, exits) per minute.
+        """
+        for linked_list in self.passenger_flow:
+            if linked_list is None or linked_list.head is None:
+                continue
+            
+            current_node = linked_list.head
+            data_list = LList()
+
+            while current_node.next is not None: 
+                entries, exits = current_node.value
+                data_list.append((entries, exits))
+                current_node = current_node.next
+
+            station_name = current_node.value
+            print("Station name", station_name)
+            self.passenger_flow_dict.insert(station_name, data_list)
+        print(self.passenger_flow_dict, len(self.passenger_flow_dict))
+
+
+    def reset(self, seed=None, options=None):
         """Resets the environment at the start of an episode."""
         for bus in self.buses:
             bus.location = None
@@ -43,15 +100,22 @@ class TransMeloEnv(gym.Env):
         self.available_buses = ObjArr(self.num_buses)
         return self.get_state()
 
+
     def get_state(self):
         """Encodes the current environment state as a numerical vector."""
-        state = np.zeros(self.num_stations * 2 + self.num_buses, dtype=np.float32)
+        state: np.ndarray = np.zeros(self.num_stations * 2 + self.num_buses, dtype=np.float32)
 
         #* Add passenger flow (entries and exits at each station)
         for i, station in enumerate(self.station_names):
-            flow = self.passenger_flow.get(station, (0, 0))  # Default to (0,0) if no data
-            state[2 * i] = flow[0]  # Entries
-            state[2 * i + 1] = flow[1]  # Exits
+            try:
+                flow = self.passenger_flow_dict.get(station)  # Default to (0,0) if no data
+                state[2 * i] = flow[0]  # Entries
+                state[2 * i + 1] = flow[1]  # Exits
+            except KeyError:
+                print(station)
+                print(self.passenger_flow_dict)
+            except ValueError:
+                pass
 
         #* Add bus locations
         for i, bus in enumerate(self.buses):
@@ -59,70 +123,89 @@ class TransMeloEnv(gym.Env):
 
         return state
 
+
     def update_passenger_demand(self):
         """
         Simulates passengers entering and exiting buses at each station.
+        - Updates the station's passenger count every minute.
+        - Updates buses when they arrive at a station.
+        - Uses an ObjArr of linked lists where each station stores (entries, exits) per minute.
         """
+        # Track station passenger counts (keeps people waiting)
+        for station in self.stations:
+            passenger_data: LList = self.passenger_flow_dict[station.name]
+
+            # Retrieve new arrivals for this minute
+            if self.current_time < len(passenger_data):
+                entering, exiting = passenger_data[self.current_time]
+            else:
+                entering = 0
+                exiting = 0  # No more data available
+            
+            # Update station's waiting passengers
+            station.current_passengers = max(0, station.current_passengers + entering - exiting)
+
+        # Update buses picking up passengers
         for bus in self.buses:
-            if bus.location is not None:
-                entering, exiting = self.passenger_flow.get(bus.location, (0, 0))
-                bus.number_of_passangers = max(0, min(bus.capacity, 
-                    bus.number_of_passangers + entering - exiting))
+            if bus.location is not None and bus.time_since_last_stop == 0:
+                station_name = bus.location
+                
+                if station_name in self.passenger_flow_dict and bus.in_service:
+                    # Bus picks up passengers
+                    boarding = min(bus.capacity - bus.number_of_passangers, station.current_passengers)
+                    
+                    bus.number_of_passangers += boarding
+                    station.current_passengers -= boarding  # Remove boarded passengers from station
+        
+        # Move to the next minute
+        self.current_time += 1
+
 
     def move_buses(self):
         """
         Updates bus locations based on predefined movement rules.
+        Allows for a U-turn decision and deployment of one or another route depending on where the bus is.
         """
         for bus in self.buses:
             if bus.location is not None:
                 current_station = bus.location
-                valid_moves = []
-
-                # Iterate through all possible neighbors
-                for neighbour, weight in self.graph.get_neighbours(current_station):
+                possible_moves = self.graph.get_neighbours(current_station)  # List of (neighbour, weight)
+                valid_move_found = False
+                
+                # Iterate through neighbors to determine if the bus can move forward.
+                for neighbour, weight in possible_moves:
+                    # Only consider neighbors that are part of the bus's current route.
                     if neighbour in bus.route.station_names:
-                        distance_needed = weight[0]  # Assuming weight[0] stores distance
-                        if bus.distance_travelled >= distance_needed:
-                            valid_moves.append((neighbour, distance_needed))
+                        time_needed = weight[1]  # The required travel time to reach this neighbor.
+                        
+                        if bus.time_since_last_stop < time_needed:
+                            # Bus is still en route; increment the timer.
+                            bus.time_since_last_stop += 1
+                            valid_move_found = True
+                            break
+                        elif bus.time_since_last_stop >= time_needed:
+                            # The bus has reached the next station.
+                            bus.location = neighbour
+                            bus.time_since_last_stop = 0  # Reset travel timer upon arrival.
+                            valid_move_found = True
+                            break
+                
+                # If no valid move was found (i.e. bus is still waiting/traveling), increment the timer.
+                if not valid_move_found:
+                    bus.time_since_last_stop += 1
 
-                # Select the closest valid move
-                if valid_moves:
-                    next_station, distance_travelled = min(valid_moves, key=lambda x: x[1])
-                    bus.location = next_station
-                    bus.distance_travelled = 0  # Reset since the bus moved
-                else:
-                    # If no valid moves were found, keep the bus in place
-                    pass
+            # U-turn decision: if the bus is at a designated U-turn station and the decision for this bus is True,
+            if bus.location in self.u_turn_stations and self.route_decision.get(bus.id) == True:
+                bus.route = "K23"
+            else:
+                bus.route = "B16"
+                bus.in_service = False
 
-            #* If the bus is at a U-turn station, allow switching routes
-            if bus.location in self.u_turn_stations and self.route_decision.get(bus.id, False):  
-                bus.route = "16" if bus.route == "23" else "23"
+                # Optionally reset the travel timer after a U-turn.
+                bus.time_since_last_stop = 0
 
-    def step(self, action):
-        """
-        Applies the agent's decision and updates the environment.
-        """
-        #* Apply action
-        self.apply_action(action)
 
-        #* Update passenger demand
-        self.update_passenger_demand()
-
-        #* Move buses
-        self.move_buses()
-
-        #* Construct the new observation
-        new_observation = self.get_state()
-
-        #* Compute reward
-        reward = self.compute_reward()
-
-        #* Check if episode is done
-        done = self.check_termination()
-
-        return new_observation, reward, done, {}
-
-    def apply_action(self, action):
+    def apply_action(self, action: ObjArr):
         """
         Applies the agent's action:
         - action[0]: U-turn decision (binary: 0 = No, 1 = Yes)
@@ -149,3 +232,59 @@ class TransMeloEnv(gym.Env):
         """Displays the current state of the environment."""
         for bus in self.buses:
             print(f"Bus {bus.id}: Route {bus.route}, Location {bus.location}, Passengers {bus.number_of_passangers}/{bus.capacity}")
+
+
+
+    def step(self, action: ObjArr):
+        """
+        Applies the agent's decision and updates the environment.
+        """
+        #* Apply action
+        self.apply_action(action)
+
+        #* Update passenger demand
+        self.update_passenger_demand()
+
+        #* Move buses
+        self.move_buses()
+
+        #* Construct the new observation
+        new_observation = self.get_state()
+
+        #* Compute reward
+        reward = self.compute_reward()
+
+        #* Check if episode is done
+        done = self.check_termination()
+
+        return new_observation, reward, done, {}
+
+
+if __name__ == "__main__":
+    buses: ObjArr = ObjArr(10)
+    for i in range(len(buses)):
+        buses[i] = Bus(i)
+    u_turn: ObjArr = ObjArr(1)
+    u_turn[0] = "Alcalá – Colegio S. Tomás Dominicos"
+    stations: ObjArr = ObjArr(22)
+    joint_stations: Route = joint()
+    for i in range(len(stations)):
+        stations[i] = Station(name=joint_stations.station_names[i])
+    print(stations)
+    TransMeloEnv(station_names=joint().station_names, station_list=stations, initial_buses=buses, max_time=60, u_turn_stations=u_turn, passenger_flow=clean_data_arr())
+
+
+gym.register(id="TransMelo-v0", entry_point=TransMeloEnv)
+
+if __name__ == "__main__":
+
+    env = gym.make("TransMelo-v0")
+
+    # Initialize PPO model
+    model = PPO("TransMelo-v0", env, verbose=1)
+
+    # Train the agent
+    model.learn(total_timesteps=100)
+
+    # Save the trained model
+    model.save("TransMelo-v0")

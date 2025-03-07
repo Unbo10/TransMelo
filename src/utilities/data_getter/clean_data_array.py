@@ -32,7 +32,7 @@ def sort_by_first_element(arr: ObjArr) -> ObjArr:
     return result
 
 
-def clean_data_arr(start_time: int = 3, end_time: int = 4) -> ObjArr:
+def clean_data_arr(start_time: int = 8, end_time: int = 9) -> ObjArr:
     joint_routes = joint()
     data_arr: ObjArr = create_data_array("data/20250211.csv", route=joint_routes, start_time=start_time, end_time=end_time, filter_entrances=False) #!The filter can be set to true if we are guaranteed there will be data for every 15-minute interval of time
     sorted_arr = sort_by_first_element(data_arr)
@@ -126,6 +126,8 @@ def clean_data_arr(start_time: int = 3, end_time: int = 4) -> ObjArr:
     for station in clean_arr:
         print("---")
         print(station)
+
+    return clean_arr
     
 if __name__ == "__main__":
     clean_data_arr() #! Temporary

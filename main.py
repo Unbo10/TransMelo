@@ -3,9 +3,8 @@ import gymnasium as gym
 from optimization.ppo.trainer import train
 from config import Config
 import numpy as np
-from src.web.page import run_page
+from src.web.page import *
 
 if __name__ == "__main__":
     env = gym.make(Config.ENV_NAME)
     train(env)
-    run_page()

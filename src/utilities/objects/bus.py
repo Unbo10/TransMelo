@@ -7,7 +7,10 @@ class Bus:
         self.capacity: int = capacity
         self.number_of_passangers: int = 0
         self.location: str = None
-        self.distance_travelled: int = 0 #* To know how much distance has it travelled between two stations
+        self.time_since_last_stop: int = 0 #* To know how much time has ellapsed since the last stop made
+        self.at_stop: bool = False
+        self.in_service: bool = True
+        self.is_moving: bool = False
 
     @property
     def id(self) -> str:

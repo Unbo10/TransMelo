@@ -50,7 +50,7 @@ class Dictionary:
         hash_index: int = 0
         #*To reduce collisions (since there will be no more than 30 stations,
         #*31 is a good number)
-        prime: int = 31
+        prime: int = 47
         for char in key:
             #*Convert to ASCII and compute modulo capacity
             hash_index = (hash_index * prime + ord(char)) % self.__capacity
