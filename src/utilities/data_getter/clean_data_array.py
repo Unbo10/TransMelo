@@ -67,8 +67,6 @@ def clean_data_arr(start_time: int = 8, end_time: int = 9) -> ObjArr:
         while i < len(sorted_arr) and sorted_arr[i][3][1:6] == current_station_code:
             #*Check how many devices are there for the station
             time_range = 0
-            print(i)
-            print(f"{hour_tracker}:{minute_tracker}")
             if int(minute_tracker) % 60 == 0 and minute_tracker != "00":
                 minute_tracker = "00"
                 hour_tracker = sorted_arr[i][1][0:2]
@@ -90,7 +88,7 @@ def clean_data_arr(start_time: int = 8, end_time: int = 9) -> ObjArr:
             #*six buses that are on average in each station and direction
             entrances = entrances // 6 + (entrances % 6)
             exits = exits // 6 + (exits % 6)
-            print("Station", current_station_code, "Entrances", entrances, "Exits", exits, f"{hour_tracker}:{minute_tracker}")
+            # print("Station", current_station_code, "Entrances", entrances, "Exits", exits, f"{hour_tracker}:{minute_tracker}")
             #*Extrapolate a 15-minute interval into 15 minutes
             for k in range(time_elapsed, time_elapsed + 15):
                 entrances_and_exits: IntArr = IntArr(2)
@@ -116,16 +114,12 @@ def clean_data_arr(start_time: int = 8, end_time: int = 9) -> ObjArr:
 
             i = i + time_range
         #*Once there's no more info about the station, proceed to the next one
-        print(i)
+        # print(i)
         try:
             clean_arr[station_num].append(sorted_arr[i][3][7:])
         except IndexError:
             clean_arr[station_num].append(sorted_arr[i - 1][3][7:])
         station_num += 1
-        
-    for station in clean_arr:
-        print("---")
-        print(station)
 
     return clean_arr
     

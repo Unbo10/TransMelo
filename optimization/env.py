@@ -25,7 +25,6 @@ class TransMeloEnv(gym.Env):
         max_time=60
         ):
         super(TransMeloEnv, self).__init__()
-
         if station_names is None:
             station_names = joint().station_names
         if station_list is None:
@@ -34,11 +33,10 @@ class TransMeloEnv(gym.Env):
             for i in range(len(stations)):
                 stations[i] = Station(name=joint_stations.station_names[i])
             station_list = stations
-        if initial_buses is None:
-            buses = ObjArr(10)
-            for i in range(len(buses)):
-                buses[i] = Bus(i)
-            initial_buses = buses
+        buses = LList()
+        for i in range(10):
+            buses.append(Bus(str(i)))
+        initial_buses = buses
         if passenger_flow is None:
             passenger_flow = clean_data_arr()
         if u_turn_stations is None:
@@ -55,7 +53,9 @@ class TransMeloEnv(gym.Env):
         self.u_turn_stations: ObjArr = u_turn_stations
         self.route_decision = Dictionary(10)
         self.deploy_decision = Dictionary(10)
-
+        self.max_time = max_time
+        self.current_step: int = 0
+        
         self.num_stations = len(self.station_names)
         self.num_buses = len(self.buses)
         self.available_buses = ObjArr(self.num_buses)
@@ -86,19 +86,27 @@ class TransMeloEnv(gym.Env):
                 current_node = current_node.next
 
             station_name = current_node.value
-            print("Station name", station_name)
             self.passenger_flow_dict.insert(station_name, data_list)
-        print(self.passenger_flow_dict, len(self.passenger_flow_dict))
 
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None, **kwargs):
         """Resets the environment at the start of an episode."""
+        # Optional: set the random seed if provided
+        if seed is not None:
+            np.random.seed(seed)
+            
+        # Reset bus states
         for bus in self.buses:
             bus.location = None
             bus.number_of_passangers = 0
 
         self.available_buses = ObjArr(self.num_buses)
-        return self.get_state()
+        
+        # Initialize or reset current_time
+        self.current_time = 0
+        
+        # Return both observation and info dict
+        return self.get_state(), {}  # Return (observation, empty info dict)
 
 
     def get_state(self):
@@ -112,8 +120,9 @@ class TransMeloEnv(gym.Env):
                 state[2 * i] = flow[0]  # Entries
                 state[2 * i + 1] = flow[1]  # Exits
             except KeyError:
-                print(station)
-                print(self.passenger_flow_dict)
+                pass
+                # print(station)
+                # print(self.passenger_flow_dict)
             except ValueError:
                 pass
 
@@ -134,13 +143,8 @@ class TransMeloEnv(gym.Env):
         # Track station passenger counts (keeps people waiting)
         for station in self.stations:
             passenger_data: LList = self.passenger_flow_dict[station.name]
-
-            # Retrieve new arrivals for this minute
-            if self.current_time < len(passenger_data):
-                entering, exiting = passenger_data[self.current_time]
-            else:
-                entering = 0
-                exiting = 0  # No more data available
+            entering, exiting = passenger_data[self.current_time]
+            print(entering, exiting)
             
             # Update station's waiting passengers
             station.current_passengers = max(0, station.current_passengers + entering - exiting)
@@ -166,6 +170,7 @@ class TransMeloEnv(gym.Env):
         Updates bus locations based on predefined movement rules.
         Allows for a U-turn decision and deployment of one or another route depending on where the bus is.
         """
+        # print("Buses", self.buses)
         for bus in self.buses:
             if bus.location is not None:
                 current_station = bus.location
@@ -234,30 +239,76 @@ class TransMeloEnv(gym.Env):
             print(f"Bus {bus.id}: Route {bus.route}, Location {bus.location}, Passengers {bus.number_of_passangers}/{bus.capacity}")
 
 
+    def compute_reward(self):
+        reward = 0
+        
+        # Reward for passengers in transit
+        total_passengers_in_buses = sum(bus.number_of_passangers for bus in self.buses if bus.location is not None)
+        reward += total_passengers_in_buses * 0.5
+        # print(f"Passengers in buses: {total_passengers_in_buses}, Reward: {total_passengers_in_buses * 0.5}")
+
+        # Penalty for waiting passengers
+        total_waiting_passengers = sum(station.current_passengers for station in self.stations)
+        reward -= total_waiting_passengers * 0.2
+        # print(f"Waiting passengers: {total_waiting_passengers}, Penalty: {total_waiting_passengers * 0.2}")
+
+        # Penalty for unused capacity
+        total_available_capacity = sum(bus.capacity - bus.number_of_passangers 
+                                    for bus in self.buses 
+                                    if bus.location is not None and bus.in_service)
+        reward -= total_available_capacity * 0.1
+        # print(f"Unused capacity: {total_available_capacity}, Penalty: {total_available_capacity * 0.1}")
+
+        # Reward for serving high-demand stations
+        for bus in self.buses:
+            if bus.location is not None and bus.location in self.passenger_flow_dict:
+                try:
+                    station_demand = self.passenger_flow_dict.get(bus.location)[0]
+                    if station_demand > 5:
+                        reward += 3
+                        print(f"High-demand station served: {bus.location}, Bonus: 3")
+                except (TypeError, IndexError):
+                    pass
+
+        return reward
+
+
+
 
     def step(self, action: ObjArr):
         """
         Applies the agent's decision and updates the environment.
         """
-        #* Apply action
+        # Apply action
         self.apply_action(action)
 
-        #* Update passenger demand
+        # Update passenger demand
         self.update_passenger_demand()
 
-        #* Move buses
+        # Move buses
         self.move_buses()
 
-        #* Construct the new observation
+        self.current_step += 1
+
+        # Construct the new observation
         new_observation = self.get_state()
 
-        #* Compute reward
+        # Compute reward
         reward = self.compute_reward()
 
-        #* Check if episode is done
-        done = self.check_termination()
+        # print(f"Step: {self.current_step}, Reward: {reward}")
 
-        return new_observation, reward, done, {}
+        # Check if episode is done
+        terminated = False
+        truncated = False
+        if self.current_time == self.max_time:
+            terminated = True
+
+        # In Gymnasium API, done is split into terminated and truncated
+        # terminated = episode ended due to reaching a terminal state
+        # truncated = episode ended due to external factors (like time limit)
+
+        return new_observation, reward, terminated, truncated, {}
 
 
 if __name__ == "__main__":
@@ -270,7 +321,6 @@ if __name__ == "__main__":
     joint_stations: Route = joint()
     for i in range(len(stations)):
         stations[i] = Station(name=joint_stations.station_names[i])
-    print(stations)
     TransMeloEnv(station_names=joint().station_names, station_list=stations, initial_buses=buses, max_time=60, u_turn_stations=u_turn, passenger_flow=clean_data_arr())
 
 
@@ -284,7 +334,7 @@ if __name__ == "__main__":
     model = PPO("TransMelo-v0", env, verbose=1)
 
     # Train the agent
-    model.learn(total_timesteps=100)
+    model.learn(total_timesteps=5)
 
     # Save the trained model
     model.save("TransMelo-v0")
