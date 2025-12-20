@@ -3,7 +3,12 @@
 name = "TransMelo"
 version = "0.1.0"
 description = "A way to optimize TransMilenio's routes"
-authors = ["Santiago Rocha Pachon <srochap@unal.edu.co>"]
+authors = [
+    { name = "Santiago Rocha Pachón", email = "srochap@unal.edu.co" },
+    { name = "Daniel Santiago Melo Carrillo", email = "dmeloca@unal.edu.co" },
+    { name = "Jesús Esteban Pérez Rodríguez", email = "jeperezro@unal.edu.co" },
+    { name = "Juan Guillermo ", email = "" }    
+]
 license = "MIT"
 readme = "README.md"
 
