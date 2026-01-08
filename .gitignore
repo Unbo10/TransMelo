@@ -6,3 +6,6 @@
 
 #* Visual Studio files
 .vscode/
+
+#*Extra learning resources
+learning/
