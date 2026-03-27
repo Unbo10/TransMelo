@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from collections import deque
+from dataclasses import dataclass
+from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -11,6 +13,32 @@ from .station import Station
 from .terminal import Terminal
 from .terminal_spec import TerminalSpec
 from .types import RouteId, StationId, TerminalId
+
+
+@dataclass
+class ActionCandidate:
+    """
+    Atomic option available to the agent for a single decision event.
+    """
+    kind: str  # "HOLD", "DISPATCH", "TRANSFER"
+    route_id: Optional[RouteId] = None
+    end_station_id: Optional[StationId] = None
+    end_idx: Optional[int] = None
+    to_terminal_id: Optional[TerminalId] = None
+    travel_ticks: Optional[int] = None
+
+
+@dataclass
+class DecisionEvent:
+    """
+    Represents a single decision for an available bus at a terminal.
+    """
+    event_type: str
+    t_tick: int
+    t_sec: float
+    terminal_id: TerminalId
+    bus_id: int
+    candidates: List[ActionCandidate]
 
 
 class World:
@@ -56,6 +84,9 @@ class World:
         self.completed_routes_total = 0
         self.q_max_total = 0.0
         self.transfer_queue: List[Tuple[int, TerminalId, TerminalId, int]] = []
+        self.event_queue: Deque[DecisionEvent] = deque()
+        self.last_event_t: Optional[int] = None
+        self.action_candidates_max = max(1, int(self.config.action_candidates_max))
 
         self._build_stations()
 
@@ -209,6 +240,48 @@ class World:
             options[from_terminal] = terminal_opts
         self.transfer_options = options
 
+    def _append_events_sorted(
+        self,
+        entries: List[Tuple[int, TerminalId]],
+        event_t: Optional[int] = None,
+        event_time_sec: Optional[float] = None,
+    ) -> None:
+        """
+        Append decision events for ready buses, sorted by bus_id to keep order
+        deterministic.
+        """
+        if not entries:
+            return
+        t_tick = self.t if event_t is None else event_t
+        t_sec = self.time_sec if event_time_sec is None else event_time_sec
+        for bus_id, terminal_id in sorted(entries, key=lambda e: e[0]):
+            self.event_queue.append(
+                DecisionEvent(
+                    event_type="ASSIGN_BUS",
+                    t_tick=t_tick,
+                    t_sec=t_sec,
+                    terminal_id=terminal_id,
+                    bus_id=bus_id,
+                    candidates=[],
+                )
+            )
+        self.last_event_t = t_tick
+
+    def _enqueue_available_buses_for_current_time(self) -> None:
+        """
+        If no pending events, enqueue ready buses for the current tick.
+        """
+        if self.event_queue:
+            return
+        if self.last_event_t is not None and self.last_event_t == self.t:
+            return
+        ready: List[Tuple[int, TerminalId]] = []
+        for terminal_id in self.terminal_order:
+            terminal = self.terminals[terminal_id]
+            for bus_id in terminal.ready_pool:
+                ready.append((bus_id, terminal_id))
+        self._append_events_sorted(ready, event_t=self.t, event_time_sec=self.time_sec)
+
     def reset(self, seed: Optional[int] = None) -> None:
         """
         Reset world state and optionally reseed RNG.
@@ -234,10 +307,13 @@ class World:
         self.completed_routes_total = 0
         self.bus_end_idx = {}
         self.transfer_queue = []
+        self.event_queue = deque()
+        self.last_event_t = None
 
         if not self.terminal_order:
             return
 
+        ready_events: List[Tuple[int, TerminalId]] = []
         for idx, bus in enumerate(self.buses):
             terminal_id = self.terminal_order[idx % len(self.terminal_order)]
             terminal = self.terminals[terminal_id]
@@ -251,145 +327,15 @@ class World:
             bus.pax = 0
             self.bus_end_idx[bus.bus_id] = None
             terminal.ready_pool.append(bus.bus_id)
+            ready_events.append((bus.bus_id, terminal_id))
 
-    def get_action_mask(self) -> List[np.ndarray]:
+        self._append_events_sorted(ready_events, event_t=self.t, event_time_sec=self.time_sec)
+
+    def _blank_metrics(self) -> Dict[str, int]:
         """
-        Return action masks for dispatch and transfer components.
-
-        Returns
-        -------
-        List[np.ndarray]
-            List of masks for each MultiDiscrete component (dispatch per
-            terminal, then transfer per terminal in the same order).
+        Create an empty metrics dictionary for reward calculation.
         """
-        masks: List[np.ndarray] = []
-        #*Dispatch masks
-        for terminal_id in self.terminal_order:
-            terminal = self.terminals[terminal_id]
-            options = self.dispatch_options.get(terminal_id, []) #*route options
-            dispatch_term_mask = np.zeros(len(options) + 1, dtype=np.int8)
-            dispatch_term_mask[0] = 1
-            if terminal.ready_pool and options:
-                dispatch_term_mask[1:] = 1
-            masks.append(dispatch_term_mask)
-
-        #*Transfer masks (moving a bus to another terminal)
-        for terminal_id in self.terminal_order:
-            terminal = self.terminals[terminal_id]
-            options = self.transfer_options.get(terminal_id, []) #*transfer options
-            transfer_mask = np.zeros(len(options) + 1, dtype=np.int8)
-            transfer_mask[0] = 1
-            for idx, (to_terminal_id, _) in enumerate(options):
-                to_terminal = self.terminals.get(to_terminal_id)
-                if to_terminal is None:
-                    continue
-                if not terminal.ready_pool:
-                    continue
-                #*Block if end Terminal's pool is full
-                if (len(to_terminal.ready_pool) + len(to_terminal.prep_pool)) >= to_terminal.pool_capacity:
-                    continue
-                transfer_mask[idx + 1] = 1
-            masks.append(transfer_mask)
-        return masks
-
-    def _dispatch_bus(
-        self,
-        terminal_id: TerminalId,
-        route_id: RouteId,
-        end_station_id: StationId,
-        end_idx: int,
-    ) -> bool:
-        """
-        Dispatch a ready bus from a terminal onto a route.
-
-        Parameters
-        ----------
-        terminal_id : TerminalId
-            Terminal to dispatch from.
-        route_id : RouteId
-            Route to assign.
-        end_station_id : StationId
-            Endpoint station for this run.
-        end_idx : int
-            Index of the endpoint station in the route.
-
-        Returns
-        -------
-        bool
-            True if a bus was dispatched, False otherwise.
-        """
-        #*1) Check if the route is served by the terminal and if the terminal
-        #*appears in and is not the last stop of the route
-        if route_id not in self.config.terminal_routes.get(terminal_id, []):
-            return False
-        terminal = self.terminals[terminal_id]
-        if not terminal.ready_pool:
-            return False
-
-        route = self.routes[route_id]
-        start_idx = route.station_index(terminal.station_id)
-        if start_idx is None or start_idx >= len(route.stations) - 1: #*not found or it is last stop
-            return False
-        if end_station_id != route.stations[end_idx]:
-            return False
-        if end_idx <= start_idx:
-            return False
-
-        bus_id = terminal.dispatch(route_id) #*remove from ready pool
-        if bus_id is None:
-            return False
-
-        bus = self.buses[bus_id]
-        bus.route_id = route_id
-        bus.status = "IN_TRANSIT"
-        bus.terminal_id = None
-        bus.route_pos = start_idx
-        bus.next_station_idx = start_idx + 1
-        self.bus_end_idx[bus_id] = end_idx
-        bus.remaining_ticks = route.travel_ticks[start_idx]
-        bus.dwell_remaining = 0
-
-        last_dep = self.last_departure.get(route_id)
-        #*Update headway
-        if last_dep is not None:
-            gap = self.t - last_dep
-            self.headways[route_id].append(gap)
-            if len(self.headways[route_id]) > self.config.headway_window: #*make sure the window is the same size always
-                self.headways[route_id] = self.headways[route_id][-self.config.headway_window :]
-        self.last_departure[route_id] = self.t
-        return True
-
-    def step_tick(self, action: np.ndarray) -> Dict[str, int]:
-        """
-        Advance the world by one tick.
-
-        Parameters
-        ----------
-        action : np.ndarray
-            MultiDiscrete action array.
-
-        Returns
-        -------
-        Dict[str, int]
-            Per-tick metrics.
-        """
-        return self.tick(action)
-
-    def tick(self, action: np.ndarray) -> Dict[str, int]:
-        """
-        Advance the world by one tick with the given action.
-
-        Parameters
-        ----------
-        action : np.ndarray
-            MultiDiscrete action array.
-
-        Returns
-        -------
-        Dict[str, int]
-            Per-tick metrics for reward and logging.
-        """
-        metrics = {
+        return {
             "boarded": 0,
             "denied": 0,
             "dispatches": 0,
@@ -399,15 +345,297 @@ class World:
             "completed_by_route": {route_id: 0 for route_id in self.routes},
         }
 
-        #*1) Update demand of each station (new users entering the queues)
+    def blank_metrics(self) -> Dict[str, int]:
+        """
+        Public helper to create an empty metrics dictionary.
+        """
+        return self._blank_metrics()
+
+    def peek_event(self) -> Optional[DecisionEvent]:
+        """
+        Return the current pending decision event without removing it.
+        """
+        if not self.event_queue:
+            return None
+        return self.event_queue[0]
+
+    def pop_next_event(self) -> Optional[DecisionEvent]:
+        """
+        Pop the next pending decision event.
+        """
+        if not self.event_queue:
+            return None
+        return self.event_queue.popleft()
+
+    def build_candidates(self, event: DecisionEvent) -> List[ActionCandidate]:
+        """
+        Build candidate list for a decision event, capped by action_candidates_max.
+        """
+        if event.event_type != "ASSIGN_BUS":
+            event.candidates = [ActionCandidate(kind="HOLD")]
+            return event.candidates
+
+        terminal = self.terminals.get(event.terminal_id)
+        bus = self.buses[event.bus_id] if 0 <= event.bus_id < len(self.buses) else None
+        candidates: List[ActionCandidate] = [ActionCandidate(kind="HOLD")]
+        if terminal is None or bus is None:
+            event.candidates = candidates
+            return event.candidates
+
+        #*Only expose dispatch/transfer if the bus is actually ready at this terminal
+        if bus.status == "READY_IN_POOL" and bus.terminal_id == terminal.terminal_id:
+            for route_id, end_station_id, end_idx in self.dispatch_options.get(terminal.terminal_id, []):
+                if len(candidates) >= self.action_candidates_max:
+                    break
+                candidates.append(
+                    ActionCandidate(
+                        kind="DISPATCH",
+                        route_id=route_id,
+                        end_station_id=end_station_id,
+                        end_idx=end_idx,
+                    )
+                )
+            if len(candidates) < self.action_candidates_max:
+                transfer_opts = self.transfer_options.get(terminal.terminal_id, [])
+                transfer_opts = transfer_opts[: self.config.transfer_candidates_top_k]
+                for to_terminal_id, travel_ticks in transfer_opts:
+                    if len(candidates) >= self.action_candidates_max:
+                        break
+                    candidates.append(
+                        ActionCandidate(
+                            kind="TRANSFER",
+                            to_terminal_id=to_terminal_id,
+                            travel_ticks=int(travel_ticks),
+                        )
+                    )
+
+        event.candidates = candidates[: self.action_candidates_max]
+        return event.candidates
+
+    def _is_candidate_valid(self, event: DecisionEvent, candidate: ActionCandidate) -> bool:
+        """
+        Validate a candidate against the current world state.
+        """
+        if candidate.kind == "HOLD":
+            return True
+        bus = self.buses[event.bus_id] if 0 <= event.bus_id < len(self.buses) else None
+        terminal = self.terminals.get(event.terminal_id)
+        if bus is None or terminal is None:
+            return False
+        if bus.status != "READY_IN_POOL" or bus.terminal_id != terminal.terminal_id:
+            return False
+        if bus.bus_id not in terminal.ready_pool:
+            return False
+
+        if candidate.kind == "DISPATCH":
+            if (
+                candidate.route_id is None
+                or candidate.end_station_id is None
+                or candidate.end_idx is None
+            ):
+                return False
+            if candidate.route_id not in self.config.terminal_routes.get(terminal.terminal_id, []):
+                return False
+            route = self.routes.get(candidate.route_id)
+            if route is None:
+                return False
+            start_idx = route.station_index(terminal.station_id)
+            if start_idx is None or start_idx >= len(route.stations) - 1:
+                return False
+            if candidate.end_idx <= start_idx:
+                return False
+            if candidate.end_station_id != route.stations[candidate.end_idx]:
+                return False
+            return True
+
+        if candidate.kind == "TRANSFER":
+            if candidate.to_terminal_id is None:
+                return False
+            to_terminal = self.terminals.get(candidate.to_terminal_id)
+            if to_terminal is None:
+                return False
+            if (len(to_terminal.ready_pool) + len(to_terminal.prep_pool)) >= to_terminal.pool_capacity:
+                return False
+            return True
+        return False
+
+    def candidate_mask(self, event: DecisionEvent) -> np.ndarray:
+        """
+        Return boolean mask for a specific event's candidate list.
+        """
+        candidates = event.candidates or self.build_candidates(event)
+        mask = np.zeros(self.action_candidates_max, dtype=bool)
+        for idx, cand in enumerate(candidates):
+            if idx >= self.action_candidates_max:
+                break
+            mask[idx] = self._is_candidate_valid(event, cand)
+        return mask
+
+    def _dispatch_bus(
+        self,
+        terminal_id: TerminalId,
+        bus_id: int,
+        route_id: RouteId,
+        end_station_id: StationId,
+        end_idx: int,
+    ) -> bool:
+        """
+        Dispatch a specific ready bus from a terminal onto a route.
+        """
+        terminal = self.terminals.get(terminal_id)
+        if terminal is None:
+            return False
+        if bus_id not in terminal.ready_pool:
+            return False
+
+        if route_id not in self.config.terminal_routes.get(terminal_id, []):
+            return False
+        route = self.routes.get(route_id)
+        if route is None:
+            return False
+        start_idx = route.station_index(terminal.station_id)
+        if start_idx is None or start_idx >= len(route.stations) - 1:
+            return False
+        if end_station_id != route.stations[end_idx]:
+            return False
+        if end_idx <= start_idx:
+            return False
+
+        popped_bus_id = terminal.dispatch(route_id=route_id, bus_id=bus_id)
+        if popped_bus_id is None:
+            return False
+
+        bus = self.buses[popped_bus_id]
+        bus.route_id = route_id
+        bus.status = "IN_TRANSIT"
+        bus.terminal_id = None
+        bus.route_pos = start_idx
+        bus.next_station_idx = start_idx + 1
+        self.bus_end_idx[bus.bus_id] = end_idx
+        bus.remaining_ticks = route.travel_ticks[start_idx]
+        bus.dwell_remaining = 0
+
+        last_dep = self.last_departure.get(route_id)
+        if last_dep is not None:
+            gap = self.t - last_dep
+            self.headways[route_id].append(gap)
+            if len(self.headways[route_id]) > self.config.headway_window:
+                self.headways[route_id] = self.headways[route_id][-self.config.headway_window :]
+        self.last_departure[route_id] = self.t
+        return True
+
+    def _transfer_bus(self, from_terminal_id: TerminalId, bus_id: int, to_terminal_id: TerminalId, travel_ticks: int) -> bool:
+        """
+        Move a ready bus into the transfer queue towards another terminal.
+        """
+        from_terminal = self.terminals.get(from_terminal_id)
+        to_terminal = self.terminals.get(to_terminal_id)
+        if from_terminal is None or to_terminal is None:
+            return False
+        if bus_id not in from_terminal.ready_pool:
+            return False
+        if (len(to_terminal.ready_pool) + len(to_terminal.prep_pool)) >= to_terminal.pool_capacity:
+            return False
+        popped_bus_id = from_terminal.dispatch(bus_id=bus_id)
+        if popped_bus_id is None:
+            return False
+        self.transfer_queue.append((popped_bus_id, from_terminal_id, to_terminal_id, int(travel_ticks)))
+        bus = self.buses[popped_bus_id]
+        bus.status = "IN_TRANSFER"
+        bus.terminal_id = None
+        bus.route_id = None
+        bus.route_pos = None
+        bus.next_station_idx = None
+        bus.remaining_ticks = 0
+        bus.dwell_remaining = 0
+        bus.pax = 0
+        self.bus_end_idx[bus.bus_id] = None
+        return True
+
+    def apply_candidate(self, event: DecisionEvent, candidate: ActionCandidate) -> Dict[str, int]:
+        """
+        Apply a candidate action for a decision event and return resulting metrics.
+        """
+        metrics = self._blank_metrics()
+        if candidate.kind == "HOLD":
+            return metrics
+        if not self._is_candidate_valid(event, candidate):
+            metrics["invalid_actions"] += 1
+            return metrics
+
+        if candidate.kind == "DISPATCH":
+            assert candidate.route_id is not None
+            assert candidate.end_station_id is not None
+            assert candidate.end_idx is not None
+            accepted = self._dispatch_bus(
+                terminal_id=event.terminal_id,
+                bus_id=event.bus_id,
+                route_id=candidate.route_id,
+                end_station_id=candidate.end_station_id,
+                end_idx=candidate.end_idx,
+            )
+            if accepted:
+                metrics["dispatches"] += 1
+            else:
+                metrics["invalid_actions"] += 1
+            return metrics
+
+        if candidate.kind == "TRANSFER":
+            assert candidate.to_terminal_id is not None
+            travel_ticks = int(candidate.travel_ticks or 0)
+            if travel_ticks < 0:
+                metrics["invalid_actions"] += 1
+                return metrics
+            accepted = self._transfer_bus(
+                from_terminal_id=event.terminal_id,
+                bus_id=event.bus_id,
+                to_terminal_id=candidate.to_terminal_id,
+                travel_ticks=travel_ticks,
+            )
+            if accepted:
+                metrics["bus_transfers"] += 1
+            else:
+                metrics["invalid_actions"] += 1
+            return metrics
+
+        metrics["invalid_actions"] += 1
+        return metrics
+
+    def advance_until_event(self) -> Tuple[float, bool]:
+        """
+        Advance simulation in internal ticks until an event is available or
+        horizon reached.
+        """
+        reward_accum = 0.0
+        truncated = self.t >= self.config.horizon_ticks
+
+        self._enqueue_available_buses_for_current_time()
+        if self.event_queue or truncated: #*action required or reached horizon
+            return reward_accum, truncated
+
+        while not self.event_queue and not truncated:
+            metrics = self._advance_one_tick()
+            reward_accum += self.reward(metrics)
+            truncated = self.t >= self.config.horizon_ticks
+            if truncated:
+                break
+            self._enqueue_available_buses_for_current_time()
+            if self.event_queue:
+                break
+        return reward_accum, truncated
+
+    def _advance_one_tick(self) -> Dict[str, int]:
+        """
+        Advance the world by a single tick (time step) without external actions.
+        """
+        metrics = self._blank_metrics()
+
+        #*1) Update demand at each station
         for station in self.stations.values():
             new_demand = station.new_demand_at(self.t, self.rng)
             station.add_demand(new_demand)
 
-        #*2) Update buses ...
-        #*2.1) For each bus in transit (i.e., has a route but it is not at a
-        #*station), subtract one tick to the remaining ones till next stop, and
-        #*set to 'dwelling mode' if it arrived to the stop
+        #*2) Move buses in transit towards next stop
         newly_arrived: set[int] = set()
         for bus in self.buses:
             if bus.status != "IN_TRANSIT" or bus.route_id is None:
@@ -415,7 +643,7 @@ class World:
             bus.remaining_ticks -= 1
             if bus.remaining_ticks > 0:
                 continue
-            #*Set dwelling mode
+            #*Set bus to dwelling if it reached its next stop (no ticks remaining)
             route = self.routes[bus.route_id]
             bus.status = "DWELLING"
             bus.route_pos = bus.next_station_idx
@@ -425,9 +653,9 @@ class World:
             bus.dwell_remaining = route.extra_dwell_ticks + station.dwell_ticks
             newly_arrived.add(bus.bus_id)
 
-        #*2.2) For each bus at a stop (dwelling mode)
+        #*3) Handle dwell: alight/board and route completion
+        new_ready_events: List[Tuple[int, TerminalId]] = []
         for bus in self.buses:
-            #*Boarding/Alighiting at a stop of an active route
             if bus.status != "DWELLING" or bus.route_id is None or bus.route_pos is None:
                 continue
             if bus.bus_id in newly_arrived:
@@ -450,7 +678,6 @@ class World:
             #*bus to pool, and reset bus config
             end_idx = self.bus_end_idx.get(bus.bus_id, len(route.stations) - 1)
             if bus.route_pos == end_idx:
-                #*Update metrics
                 completed_route_id = bus.route_id
                 if completed_route_id is not None:
                     metrics["completed_routes"] += 1
@@ -466,13 +693,13 @@ class World:
                     raise RuntimeError(
                         f"Endpoint station '{end_station}' for route '{route.route_id}' has no terminal."
                     )
-                else:
-                    terminal = self.terminals[terminal_id]
-                    terminal.accept_bus(bus.bus_id)
-                    bus.status = "IN_TERMINAL_PREP"
-                    bus.terminal_id = terminal_id
-
-                #*Resetting bus. Guarantees metrics updated just once
+                terminal = self.terminals[terminal_id]
+                accepted = terminal.accept_bus(bus.bus_id)
+                if not accepted:
+                    raise RuntimeError(f"Terminal '{terminal_id}' is full; bus '{bus.bus_id}' cannot alight.")
+                #*Reset bus info
+                bus.status = "IN_TERMINAL_PREP"
+                bus.terminal_id = terminal_id
                 bus.route_id = None
                 bus.route_pos = None
                 bus.next_station_idx = None
@@ -487,12 +714,12 @@ class World:
             bus.next_station_idx = bus.route_pos + 1
             bus.remaining_ticks = route.travel_ticks[bus.route_pos]
 
-        #*2.3) Update buses transferring from one terminal to another
+        #*4) Update (bus) transfer queue
         idx = 0
         while idx < len(self.transfer_queue):
             bus_id, from_terminal_id, to_terminal_id, remaining_ticks = self.transfer_queue[idx]
             remaining_ticks -= 1
-            if remaining_ticks == 0: #*arrived to the destination terminal
+            if remaining_ticks == 0:
                 dest_terminal = self.terminals.get(to_terminal_id)
                 if dest_terminal is None:
                     raise RuntimeError(
@@ -503,92 +730,39 @@ class World:
                     bus.status = "IN_TERMINAL_PREP"
                     bus.terminal_id = dest_terminal.terminal_id
                     self.transfer_queue.pop(idx)
-                else: #*if bus is rejected, leaves it in queue to retry in the next tick
+                else: #*if bus is rejected, leaves it in queue to retry next tick
                     self.transfer_queue[idx] = (bus_id, from_terminal_id, to_terminal_id, 1)
-            else: #*simply update the queue with remaining ticks for this bus
+                    idx += 1
+            else: #*just subtracted a remaining tick
                 self.transfer_queue[idx] = (bus_id, from_terminal_id, to_terminal_id, remaining_ticks)
-            idx += 1
+                idx += 1
 
-        #*3)Update Terminal's pools
+        #*5) Tick prep pools and capture newly ready buses
         for terminal in self.terminals.values():
-            terminal.tick_prep()
-            # for bus_id, _ in terminal.prep_pool: #*Handled in 2.3; deemed redundant
-            #     self.buses[bus_id].status = "IN_TERMINAL_PREP"
-            #     self.buses[bus_id].terminal_id = terminal.terminal_id
+            ready_now = terminal.tick_prep()
+            if ready_now:
+                new_ready_events.extend((bus_id, terminal.terminal_id) for bus_id in ready_now)
             for bus_id in terminal.ready_pool:
                 self.buses[bus_id].status = "READY_IN_POOL"
                 self.buses[bus_id].terminal_id = terminal.terminal_id
 
-        #*4) Action parsing
-        action_arr = np.asarray(action, dtype=int)
-        expected_size = len(self.terminal_order) * 2 #*dispatch and transfer per terminal
-        if action_arr.size != expected_size:
-            raise ValueError(
-                f"Action has size {action_arr.size}, expected {expected_size} "
-                f"(dispatch + transfer per terminal)."
-            )
-        dispatch_actions = action_arr[: len(self.terminal_order)]
-        transfer_actions = action_arr[len(self.terminal_order) :]
-
-        #*4.1) Execute or reject Terminal dispatch actions
-        for terminal_id, act in zip(self.terminal_order, dispatch_actions):
-            if act == 0: #*no action at this Terminal
-                continue
-            options = self.dispatch_options.get(terminal_id, [])
-            option_idx = int(act) - 1
-            if option_idx < 0 or option_idx >= len(options): #*invalid
-                metrics["invalid_actions"] += 1
-                continue
-            #*Requestispatch at this Terminal
-            route_id, end_station_id, end_idx = options[option_idx]
-            accepted_dispatch = self._dispatch_bus(terminal_id, route_id, end_station_id, end_idx)
-            if accepted_dispatch:
-                metrics["dispatches"] += 1
-            else:
-                metrics["invalid_actions"] += 1
-
-        #*4.2) Execute or reject transfer actions (per terminal)
-        for terminal_id, act in zip(self.terminal_order, transfer_actions):
-            if act == 0:
-                continue
-            options = self.transfer_options.get(terminal_id, [])
-            option_idx = int(act) - 1
-            if option_idx < 0 or option_idx >= len(options):
-                metrics["invalid_actions"] += 1
-                continue
-            to_terminal_id, travel_ticks = options[option_idx]
-            from_terminal = self.terminals.get(terminal_id)
-            to_terminal = self.terminals.get(to_terminal_id)
-            if from_terminal is None or to_terminal is None: #*invalid terminals
-                metrics["invalid_actions"] += 1
-            elif not from_terminal.ready_pool: #*empty ready pool
-                metrics["invalid_actions"] += 1
-            elif (len(to_terminal.ready_pool) + len(to_terminal.prep_pool)) >= to_terminal.pool_capacity: #*destination terminal cannot accept incoming bus
-                metrics["invalid_actions"] += 1
-            else:
-                bus_id = from_terminal.dispatch()
-                if bus_id is None: #*safeguard: empty ready pool
-                    metrics["invalid_actions"] += 1
-                else:
-                    self.transfer_queue.append(
-                        (bus_id, terminal_id, to_terminal_id, int(travel_ticks))
-                    )
-                    bus = self.buses[bus_id]
-                    bus.status = "IN_TRANSFER"
-                    bus.terminal_id = None
-                    bus.route_id = None
-                    bus.route_pos = None
-                    bus.next_station_idx = None
-                    bus.remaining_ticks = 0
-                    bus.dwell_remaining = 0
-                    bus.pax = 0
-                    self.bus_end_idx[bus_id] = None
-                    metrics["bus_transfers"] += 1
-
-        #*5) Update time
+        #*6) Advance time and enqueue events for buses that just became ready
         self.t += 1
         self.time_sec += self.config.dt_sec
+        self._append_events_sorted(new_ready_events, event_t=self.t, event_time_sec=self.time_sec)
         return metrics
+
+    def step_tick(self, action: Optional[np.ndarray] = None) -> Dict[str, int]:
+        """
+        Compatibility wrapper that advances one tick ignoring the action.
+        """
+        return self._advance_one_tick()
+
+    def tick(self, action: Optional[np.ndarray] = None) -> Dict[str, int]:
+        """
+        Compatibility wrapper that advances one tick ignoring the action.
+        """
+        return self._advance_one_tick()
 
     def _eta_to_station(self, bus: Bus, route: Route, station_idx: int) -> Optional[int]:
         """Compute ETA in ticks for a bus to reach a station index.
@@ -745,7 +919,7 @@ class World:
             dim += 2 #*time as sine and cosine values
         return dim
 
-    def reward(self, metrics: Dict[str, int]) -> float:
+    def reward(self, metrics: Dict[str, int], include_queue: bool = True) -> float:
         """
         Compute reward from per-tick metrics and queues.
 
@@ -768,13 +942,16 @@ class World:
         ----------
         metrics : Dict[str, int]
             Metrics returned from tick.
+        include_queue : bool, optional
+            Whether to include queue penalty (set False for instantaneous
+            decision rewards without time advance).
 
         Returns
         -------
         float
             Reward value.
         """
-        total_queue = sum(station.total_queue() for station in self.stations.values())
+        total_queue = sum(station.total_queue() for station in self.stations.values()) if include_queue else 0.0
         #*Values for normalization of:
         b_ref = self.config.reward_ref_boarding_bus_multiples * self.config.bus_capacity #*users boarded (def. ~3 busloads)
         q_ref = self.q_max_total * self.config.reward_ref_queue_fraction #*users waiting (def. ~1/4 of the max in the system)

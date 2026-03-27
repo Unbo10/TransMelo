@@ -120,15 +120,16 @@ class Terminal(Station):
         self.prep_pool.append((bus_id, self.prep_time_ticks))
         return True
 
-    def tick_prep(self) -> None:
+    def tick_prep(self) -> list[int]:
         """
         Advance prep timers and move ready buses to the ready pool.
 
         Returns
         -------
-        None
-            This method returns nothing.
+        list[int]
+            Bus ids that just became ready.
         """
+        ready_now: list[int] = []
         idx = 0
         while idx < len(self.prep_pool):
             bus_id, remaining = self.prep_pool[idx]
@@ -137,13 +138,15 @@ class Terminal(Station):
             if remaining <= 0:
                 self.ready_pool.append(bus_id)
                 self.prep_pool.pop(idx)
+                ready_now.append(bus_id)
             #*In case we move a bus to the ready pool, fill in the popped bus'
             #*place with the one that followed
             else:
                 self.prep_pool[idx] = (bus_id, remaining)
                 idx += 1
+        return ready_now
 
-    def dispatch(self, route_id: Optional[RouteId] = None) -> Optional[int]:
+    def dispatch(self, route_id: Optional[RouteId] = None, bus_id: Optional[int] = None) -> Optional[int]:
         """
         Pop the next ready bus for dispatch.
 
@@ -151,6 +154,9 @@ class Terminal(Station):
         ----------
         route_id : RouteId, optional
             Route id requested (unused in v0.1 but reserved for routing logic).
+        bus_id : int, optional
+            Specific bus to dispatch. If provided, the bus is removed from the
+            ready pool only if present.
 
         Returns
         -------
@@ -159,4 +165,10 @@ class Terminal(Station):
         """
         if not self.ready_pool:
             return None
-        return self.ready_pool.popleft()
+        if bus_id is None:
+            return self.ready_pool.popleft()
+        try:
+            self.ready_pool.remove(bus_id)
+        except ValueError:
+            return None
+        return bus_id

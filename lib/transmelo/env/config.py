@@ -65,6 +65,12 @@ class BRTConfig:
         3.0.
     invalid_action_penalty : float
         Penalty per invalid action. Default is 0.1.
+    action_candidates_max : int
+        Maximum number of candidate actions exposed per decision event.
+        Default is 8.
+    transfer_candidates_top_k : int
+        Maximum number of transfer options to expose per event (top-k or
+        neighbor set). Default is 3.
     default_boarding_rate : float
         Default boarding rate if not specified per station. Default is 1.0.
     default_alight_rate : float
@@ -110,6 +116,8 @@ class BRTConfig:
     enable_time_features: bool = True
     cv_max: float = 3.0
     invalid_action_penalty: float = 0.1
+    action_candidates_max: int = 8
+    transfer_candidates_top_k: int = 3
 
     #*Boarding/Alighting constants
     default_boarding_rate: float = 1.0
